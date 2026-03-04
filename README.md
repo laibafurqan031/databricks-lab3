@@ -172,5 +172,7 @@ After the pipeline completes successfully:
 - Secrets and storage keys are not committed to GitHub
 - All workflows are reproducible and CLI-driven
 - Features will be reused in later modeling labs
+- Due to the ephemeral Azure Cloud Shell environment, local code files were lost before being pushed to GitHub; however, all Azure ML resources and pipeline runs were successfully completed.
+- Screenshots of the successful pipeline run, registered Feature Store entity, data asset, and compute instance status are included in this repository as evidence.
 
 ---
