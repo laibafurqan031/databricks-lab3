@@ -9,6 +9,7 @@ code_configuration:
   scoring_script: score.py
 
 environment:
+  name: amazon-review-inference-env
   image: mcr.microsoft.com/azureml/openmpi4.1.0-ubuntu20.04
   conda_file: ../env/inference_conda.yml
 
