@@ -14,11 +14,13 @@ def parse_args():
     parser.add_argument("--val_data", type=str, required=True)
     parser.add_argument("--test_data", type=str, required=True)
     parser.add_argument("--output", type=str, required=True)
+    # Hyperparameters for sweep
+    parser.add_argument("--C", type=float, default=1.0, help="Regularization strength")
+    parser.add_argument("--max_iter", type=int, default=500, help="Maximum iterations")
     return parser.parse_args()
 
 def load_data(path):
     print(f"Loading data from: {path}")
-    # Use low_memory and read only needed columns
     df = pd.read_parquet(path)
     print(f"Loaded {len(df)} rows, {len(df.columns)} columns")
     return df
@@ -31,7 +33,7 @@ def create_labels(df):
     return df
 
 def build_features(df):
-    # Only use numeric features, exclude text and ID columns
+    # Exclude non-feature columns
     exclude_cols = ['asin', 'reviewerID', 'overall', 'summary', 'reviewText', 
                     'reviewTime', 'title', 'brand', 'price', 'helpful', 'label',
                     'review_year', 'normalized_text', 'reviewText_clean']
@@ -44,7 +46,7 @@ def build_features(df):
     if len(feature_cols) == 0:
         feature_cols = [col for col in df.columns if col not in exclude_cols and col != 'label']
     
-    # Limit features to avoid memory issues (use top 100 features if too many)
+    # Limit features to avoid memory issues (use top 500 features if too many)
     if len(feature_cols) > 500:
         print(f"Too many features ({len(feature_cols)}), limiting to top 500")
         # Get feature importance based on variance
@@ -88,8 +90,13 @@ def main():
     
     mlflow.start_run()
     
+    # Log hyperparameters
+    mlflow.log_param("C", args.C)
+    mlflow.log_param("max_iter", args.max_iter)
+    
     print("=" * 50)
     print("Starting training job...")
+    print(f"Hyperparameters: C={args.C}, max_iter={args.max_iter}")
     print("=" * 50)
     
     print("\n1. Loading data...")
@@ -115,7 +122,7 @@ def main():
     print(f"   Test set size: {X_test.shape}")
     
     print("\n5. Training model...")
-    model = LogisticRegression(max_iter=500, random_state=42, C=0.1)
+    model = LogisticRegression(max_iter=args.max_iter, random_state=42, C=args.C)
     model.fit(X_train, y_train)
     
     print("\n6. Evaluating...")
