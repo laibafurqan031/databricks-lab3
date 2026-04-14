@@ -1,220 +1,205 @@
-# DSAI3202 – Winter 2026
-## Lab 3: Data Preprocessing in Azure (Lakehouse Architecture)
-
-## Overview
-
-This lab implements an end-to-end ETL pipeline using Azure Databricks and Apache Spark following the Medallion (Lakehouse) Architecture.
-
-The Amazon Electronics Reviews dataset is processed through:
-
-- Bronze Layer → Raw JSON data
-- Silver Layer → Cleaned and processed Parquet data
-- Gold Layer → Curated analytics-ready dataset
+# DSAI3202 – Assignment 2
+## Model Training & Automation with Azure Machine Learning
 
 ---
 
-## Lakehouse Architecture
+## Assignment Objective
 
-Bronze:
-- Raw metadata in JSON format
-- Stored in raw/
+Build an end-to-end MLOps workflow on Azure ML including training, hyperparameter tuning,
+model registration, online deployment, and endpoint testing using the Amazon Electronics
+review dataset. A Logistic Regression model predicts positive vs negative reviews based on
+pre-engineered features from Lab 4.
 
-Silver:
-- Cleaned and validated reviews
-- Stored in processed/
-- Parquet format for better performance
-
-Gold:
-- Final curated dataset
-- Stored in curated/features_v1/
-- Ready for analytics and ML
+The full workflow:
+code push → Azure DevOps pipeline → Azure ML training job → MLflow metrics → versioned model → deployed endpoint
 
 ---
 
-## ETL Pipeline (Notebook Mapping)
+## Repository Structure
 
-1. 01_load_and_clean_reviews  
-   - Load Silver Parquet data  
-   - Remove null values  
-   - Enforce rating range (1–5)  
-   - Clean review text  
-
-2. 02_enrich_with_metadata  
-   - Load Bronze JSON metadata  
-   - Select relevant columns  
-   - Left join with cleaned reviews  
-
-3. 03_write_gold_features_v1  
-   - Select final features  
-   - Write curated dataset to Gold layer  
-
-The notebooks were orchestrated using a Databricks Job to ensure sequential execution.
-
----
-
-## Technologies Used
-
-Apache Spark  
-- Distributed data processing engine  
-- Used for filtering, joining, transforming large datasets  
-
-Azure Databricks  
-- Managed Spark platform  
-- Used to create clusters, notebooks, and ETL jobs  
-
-Azure Data Lake Storage Gen2  
-- Cloud storage for Bronze, Silver, and Gold layers  
-- Accessed using abfss:// paths  
-
-Parquet  
-- Columnar storage format  
-- Faster reads and better compression  
-
-JSON  
-- Used for raw metadata storage  
-
-Delta Lake (future improvement)  
-- Provides ACID transactions, schema evolution, and time travel  
+```
+├── src/
+│ ├── train.py # Training script
+│ ├── score.py # Scoring script for endpoint
+│ └── invoke_endpoint.py # Endpoint invocation using deployment split
+├── jobs/
+│ ├── train_job.yml # Azure ML command job definition
+│ ├── sweep_job.yml # Hyperparameter sweep job definition
+│ └── deployment.yml # Online deployment configuration
+├── env/
+│ ├── conda.yml # Training environment
+│ └── inference_conda.yml # Inference environment
+├── azure-pipelines.yml # Azure DevOps CI pipeline
+└── README.md
+```
 
 ---
 
-## Code Documentation
+## Dataset
 
-### Storage Connection
+Amazon Electronics reviews with features engineered in Lab 4: SBERT embeddings,
+TF-IDF vectors, sentiment scores, and review length statistics.
 
-spark.conf.set(...)
+### Splits
 
-Configures Spark to authenticate and access Azure Data Lake using storage account credentials.
+| Split      | Proportion | Rows    | Notes                                      |
+|------------|------------|---------|---------------------------------------------|
+| Train      | 60%        | 225,937 | Model training                              |
+| Validation | 15%        | 56,484  | Hyperparameter tuning and experiment comparison |
+| Test       | 15%        | 56,485  | Final offline evaluation                    |
+| Deployment | 10%        | 37,657  | Simulates production data (most recent reviews by review_year) |
 
----
-
-### Load Parquet Data
-
-reviews_df = spark.read.parquet(reviews_path)
-
-Loads processed reviews into a Spark DataFrame.
-
----
-
-### Data Cleaning
-
-filter(col("asin").isNotNull() & ...)
-
-Removes rows with missing critical fields.
-
-filter((col("overall") >= 1) & (col("overall") <= 5))
-
-Ensures valid rating values.
-
-withColumn("reviewText", trim(col("reviewText")))
-
-Cleans review text and removes short reviews.
+**Label:** `1` if `overall >= 4` (positive review), else `0`.
 
 ---
 
-### Write Cleaned Data
+## Features
 
-clean_reviews_df.write.mode("overwrite").parquet(clean_reviews_path)
+Features were pre-computed in Lab 4 and consumed directly by the training script.
+No feature engineering is performed at training time.
 
-Writes cleaned data back to the Silver layer.
-
----
-
-### Load Metadata
-
-metadata_df = spark.read.json(metadata_path)
-
-Loads raw JSON metadata.
-
-select("asin", "title", "brand", "price")
-
-Keeps only relevant enrichment fields.
+| Feature Type     | Description                                      |
+|------------------|--------------------------------------------------|
+| SBERT embeddings | Dense 384-dim vectors representing review text   |
+| TF-IDF vectors   | Sparse word frequency representations            |
+| Sentiment scores | Numeric polarity scores derived from review text |
+| Length features  | Review character/word count statistics           |
 
 ---
 
-### Join Operation
+## Model Choice
 
-clean_reviews_df.join(metadata_df, on="asin", how="left")
+**Logistic Regression** was selected for the following reasons:
 
-Enriches reviews with product metadata using a left join.
-
----
-
-### Create Gold Dataset
-
-select(...)
-
-Selects final curated columns.
-
-write.mode("overwrite").parquet(gold_path)
-
-Writes final dataset to Gold layer.
+- Simple and fast to train, which is important when running experiments through CI pipelines
+- Interpretable and easy to debug
+- Works well with high-dimensional sparse feature inputs (TF-IDF)
+- Competitive baseline for binary text classification tasks
+- Low resource footprint, relevant for the efficiency bonus
 
 ---
 
-## Gold Dataset Features
+## Hyperparameter Tuning (Sweep Job)
 
-- asin
-- title
-- brand
-- price
-- reviewerID
-- overall
-- summary
-- reviewText
-- helpful
-- reviewTime
-- review_year
+A sweep job was submitted via `jobs/sweep_job.yml` using random sampling over the following
+search space:
 
-This dataset is analytics-ready and ML-ready.
+| Hyperparameter | Type    | Range / Values |
+|----------------|---------|---------------|
+| C              | uniform | 0.001 – 10.0  |
+| max_iter       | choice  | [100, 300, 500, 1000] |
 
----
+- **Trials:** 8
+- **Objective:** maximize `val_accuracy`
+- **Best Run:** `frank_lettuce_3jd6g412z5_4`
+- **Best Params:** `C ≈ 0.1`, `max_iter = 500`
 
-## Gold Layer Visualizations
-
-### 1. Average Rating Over Time
-Grouped by review_year and calculated average rating.
-Shows rating trends and customer satisfaction changes over time.
-
-### 2. Rating Distribution
-Counted ratings (1–5) and plotted bar chart.
-Shows overall sentiment distribution and rating skewness.
-
-### 3. Brand Comparison (Optional)
-Average rating per brand.
-Identifies high-performing brands.
+The best hyperparameters were set as defaults in `train.py` and a final training run was
+submitted before model registration.
 
 ---
 
-## Additional Enrichment Opportunities
+## Final Model Performance
 
-- Sentiment analysis on reviewText
-- Helpfulness ratio feature
-- Price segmentation (low/medium/high)
-- Brand-level aggregates
-- Time-based features (month, quarter)
-- Review length feature
+Trained using best hyperparameters from the sweep (C=0.1, max_iter=500), all features.
 
----
+| Metric    | Train  | Validation | Test  |
+|-----------|--------|------------|-------|
+| Accuracy  | 85.6%  | 79.7%      | 79.7% |
+| AUC       | 0.87   | 0.69       | 0.68  |
+| F1 Score  | 91.4%  | 88.3%      | 88.3% |
 
-## Databricks Job
+**Training Runtime:** ~76 seconds (logged via MLflow as `training_runtime_seconds`)
 
-Job Name: lab3_data_preprocessing_job
-
-Pipeline Order:
-01_load_and_clean_reviews  
-→ 02_enrich_with_metadata  
-→ 03_write_gold_features_v1  
-
-Ensures automated and sequential ETL execution.
+**Note on AUC gap:** Train AUC (0.87) vs validation AUC (0.69) reflects moderate overfitting
+on the dense SBERT dimensions. The model generalizes well enough on accuracy and F1, but
+the AUC gap suggests the model is more confident on training data than it should be.
+Regularization via C=0.1 partially addresses this.
 
 ---
 
-## Learning Outcomes
+## Azure DevOps CI Pipeline
 
-- Understanding Lakehouse architecture
-- Data cleaning and validation using Spark
-- Joining structured and semi-structured data
-- Creating curated datasets
-- Orchestrating pipelines in Databricks
-- Performing analytical visualizations
+The `azure-pipelines.yml` is configured to trigger on every push to the
+`assignment2_model_training` branch.
+
+**Pipeline steps:**
+1. Check out repository
+2. Install / update Azure ML CLI extension
+3. Set Azure ML workspace defaults
+4. Submit `jobs/train_job.yml` via `az ml job create`
+5. Stream job logs until completion
+
+Every push to the trigger branch automatically runs the full training workflow on Azure ML
+compute without manual intervention.
+
+---
+
+## Model Registration
+
+```bash
+az ml model create \
+  --name amazon-review-sentiment-model \
+  --path azureml://jobs/<JOB_NAME>/outputs/model_output \
+  --type custom_model
+```
+
+- Registered Model: `amazon-review-sentiment-model:1`
+- Linked to the exact training job that produced it
+- Hyperparameters, metrics, and outputs are fully traceable via MLflow
+
+---
+
+## Deployment
+
+| Component   | Value |
+|------------|------|
+| Model       | amazon-review-sentiment-model:1 |
+| Endpoint    | amazon-review-endpoint-60301575 |
+| Deployment  | amazon-review-deployment |
+| Instance    | Standard_F2s_v2 |
+| Auth mode   | Key |
+| Scoring URI | https://amazon-review-endpoint-60301575.qatarcentral.inference.ml.azure.com/score |
+
+Deployed using `jobs/deployment.yml` with score.py as the scoring script.
+The inference environment (env/inference_conda.yml) mirrors the training environment
+without feature engineering dependencies.
+
+---
+
+## Endpoint Evaluation (Deployment Split)
+
+The deployment split (10%, most recent reviews by review_year) was used to simulate
+real production traffic via src/invoke_endpoint.py.
+
+| Metric   | Test Set | Deployment Split (full) |
+|----------|----------|-------------------------|
+| Accuracy | 79.7%    | 79.1% |
+
+The full deployment split (37,657 rows) yields 79.1% accuracy, closely matching
+the test set performance. This confirms minimal data drift for this snapshot.
+
+The deployment split performance was computed by running invoke_endpoint.py which sends
+all deployment split rows to the endpoint and calculates accuracy against true labels.
+
+---
+
+## Bonus Question
+
+> "There is one thing we are doing 'not correctly' in this assignment. What is it?"
+
+Answer: The main issue is **data leakage during feature engineering**. The TF-IDF vectorizer and any scaling or transformation steps applied in Lab 4 were fit on the entire dataset before splitting. This means information from the validation and test sets influenced the feature representation used during training, which leads to overly optimistic evaluation results.
+
+The correct approach is to fit all feature transformers (e.g., TF-IDF vectorizer, scalers) **only on the training set**, and then apply them to validation, test, and deployment sets without refitting.
+
+A secondary issue is that although a deployment split based on `review_year` is used, the training, validation, and test splits are randomly shuffled rather than strictly time-based. In a real production system, a fully temporal split would better simulate future data and reduce potential leakage across time.
+
+---
+
+## Cleanup
+
+```bash
+az ml online-endpoint delete \
+  --name amazon-review-endpoint-60301575 \
+  --yes
+```
